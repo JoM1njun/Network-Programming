@@ -51,8 +51,12 @@ def send_wrq(filename, mode):
                         data, server_new_socket = sock.recvfrom(516)  # 서버 응답 수신
                         opcode = int.from_bytes(data[:2], "big")  # opcode 확인
                         if opcode == OPCODE["ACK"]:
-                            ack_block = int.from_bytes(data[2:4], "big") # ACK 블록 번호
-                            if ack_block == block_number: # 기대하는 블록일 경우 다음 블록 전송
+                            ack_block = int.from_bytes(
+                                data[2:4], "big"
+                            )  # ACK 블록 번호
+                            if (
+                                ack_block == block_number
+                            ):  # 기대하는 블록일 경우 다음 블록 전송
                                 block_number += 1
                                 break
                         elif opcode == OPCODE["ERROR"]:  # 오류 처리
@@ -62,9 +66,9 @@ def send_wrq(filename, mode):
                     except socket.timeout:  # 응답 없을 시 재전송
                         print("Timeout, resending last block...")
                         # 마지막 블록 다시 보내기
-                        if block_number == 0: # WRQ 재전송
+                        if block_number == 0:  # WRQ 재전송
                             sock.sendto(wrq_message, server_address)
-                        else: # 이전 Data 블록 재전송
+                        else:  # 이전 Data 블록 재전송
                             f.seek((block_number - 1) * BLOCK_SIZE)
                             block_data = f.read(BLOCK_SIZE)
                             data_message = (
@@ -87,20 +91,20 @@ def send_wrq(filename, mode):
 
 
 def send_rrq(filename, mode):
-    #"""서버에 파일 다운로드 요청(RRQ)"""
-    format = f">h{len(filename)}sB{len(mode)}sB" # RRQ 메시지 포맷
+    # """서버에 파일 다운로드 요청(RRQ)"""
+    format = f">h{len(filename)}sB{len(mode)}sB"  # RRQ 메시지 포맷
     rrq_message = pack(
         format, OPCODE["RRQ"], bytes(filename, "utf-8"), 0, bytes(mode, "utf-8"), 0
     )
-    sock.sendto(rrq_message, server_address) # 서버로 RRQ 메시지 전송
+    sock.sendto(rrq_message, server_address)  # 서버로 RRQ 메시지 전송
     print(f"=> RRQ message: {rrq_message}")
 
 
 def send_ack(seq_num, server):
     # """서버에 ACK 메시지 전송"""
     format = f">hh"
-    ack_message = pack(format, OPCODE["ACK"], seq_num) # ACK 메시지 포맷
-    sock.sendto(ack_message, server) # 서버로 ACK 메시지 전송
+    ack_message = pack(format, OPCODE["ACK"], seq_num)  # ACK 메시지 포맷
+    sock.sendto(ack_message, server)  # 서버로 ACK 메시지 전송
     print(f"\n=> Block number: {seq_num}, Ack message: {ack_message}")
     # print(ack_message)
 
@@ -134,53 +138,58 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(TIME_OUT)
 
 mode = DEFAULT_TRANSFER_MODE
-operation = args.operation
+operation = args.operation.lower()
 filename = args.filename
 
-# 파일 업로드 요청
-send_rrq(filename, mode)
 
-# 수신할 파일 열기
-file = open(filename, "wb")
-expected_block_number = 1  # 기대하는 값
-acked_block_number = 0  # 마지막으로 ack한 값
-ack_trial_number = 0  # 재전송 횟수
+if operation == "get":
+    send_rrq(filename, mode)
+    # 다운로드 루프
+    file = open(filename, "wb")
+    expected_block = 1  # 기대하는 블록 번호 초기화
+    last_acked = 0  # 마지막으로 ACK 보낸 블록 번호 초기화
 
-while True:
     while True:
         try:
-            data, server_new_socket = sock.recvfrom(516) # 최대 516바이트 수신
-            opcode = int.from_bytes(data[:2], "big") # opcode 확인
+            data, server_new_socket = sock.recvfrom(516)  # 최대 516바이트 수신
+        except socket.timeout:
+            print("Timeout waiting for data...")
+            send_ack(
+                last_acked, server_new_socket
+            )  # 마지막으로 ACK 보낸 블록 번호 재전송
+            continue
+
+        opcode = int.from_bytes(data[:2], "big")  # 수신한 패킷의 opcode 확인
+
+        if opcode == OPCODE["DATA"]:  # 데이터 패킷 처리
+            block_num = int.from_bytes(data[2:4], "big")  # 데이터 블록 번호 추출
+            file_data = data[4:]  # 실제 파일 데이터 추출
+            if block_num == expected_block:  # 기대하는 블록인 경우
+                file.write(file_data)
+                send_ack(block_num, server_new_socket)  # ACK 전송
+                last_acked = block_num  # 마지막으로 ACK 보낸 블록 번호 업데이트
+                expected_block += 1
+            else:
+                send_ack(
+                    last_acked, server_new_socket
+                )  # 예상 블록 번호가 아니면 마지막으로 ACK 보낸 블록 번호 재전송
+
+            if len(file_data) < BLOCK_SIZE:  # 마지막 블록인 경우
+                print("Download complete")
+                file.close()
+                break
+
+        elif opcode == OPCODE["ERROR"]:
+            code = int.from_bytes(data[2:4], "big")  # 오류 코드 추출
+            print(
+                f"Server Error: {ERROR_CODE.get(code, 'Unknown')}"
+            )  # 서버 오류 메시지 출력
+            file.close()
             break
-        except socket.timeout: # 응답 없을 시 재전송
-            if expected_block_number == 1: # 첫 블록 못 받으면 종료
-                sys.exit()
-            else: # 마지막 ACK 재전송
-                send_ack(acked_block_number, server_new_socket)
 
-    # opcode에 따른 처리
-    if opcode == OPCODE["DATA"]: # Data 패킷 수신
-        block_number = int.from_bytes(data[2:4], "big")
-        if block_number == expected_block_number: # 기대하는 블록일 경우 기록
-            send_ack(block_number, server_new_socket) # ACK 전송
-            acked_block_number = block_number
-            expected_block_number = expected_block_number + 1
-            file_block = data[4:] # 실제 파일 데이터
-            file.write(file_block)
-            print(file_block.decode()) # 콘솔 출력
-        else: # 기대하는 블록이 아닐 경우 마지막 ACK 재전송
-            send_ack(acked_block_number, server_new_socket)
+elif operation == "put":
+    send_wrq(filename, mode)  # 서버에 파일 업로드 요청(WRQ) 전송
 
-    elif opcode == OPCODE["ERROR"]: # 오류 처리
-        error_code = int.from_bytes(data[2:4], byteorder="big")
-        print(f"Error: {ERROR_CODE[error_code]} exit...")
-        break
-
-    else: # 그 외 메시지 -> 종료
-        break
-
-    # 마지막 블록 확인
-    if len(file_block) < BLOCK_SIZE:
-        file.close()
-        # print(len(file_block))
-        break
+else:
+    print("Invalid operation. Use 'get' or 'put'.")
+    sys.exit()
