@@ -91,7 +91,7 @@ def send_wrq(filename, mode):
 
 
 def send_rrq(filename, mode):
-    # """서버에 파일 다운로드 요청(RRQ)"""
+    """서버에 파일 다운로드 요청(RRQ)"""
     format = f">h{len(filename)}sB{len(mode)}sB"  # RRQ 메시지 포맷
     rrq_message = pack(
         format, OPCODE["RRQ"], bytes(filename, "utf-8"), 0, bytes(mode, "utf-8"), 0
@@ -101,7 +101,7 @@ def send_rrq(filename, mode):
 
 
 def send_ack(seq_num, server):
-    # """서버에 ACK 메시지 전송"""
+    """서버에 ACK 메시지 전송"""
     format = f">hh"
     ack_message = pack(format, OPCODE["ACK"], seq_num)  # ACK 메시지 포맷
     sock.sendto(ack_message, server)  # 서버로 ACK 메시지 전송
@@ -193,3 +193,4 @@ elif operation == "put":
 else:
     print("Invalid operation. Use 'get' or 'put'.")
     sys.exit()
+
