@@ -1,4 +1,4 @@
-# 2189014 조민준 \n Network-Programming Final Project
+# 2189014 조민준 Network-Programming Final Project
 
 
 1. TFTPClientGet.py : TFTP를 통해 파일을 Get or Put하는 코드
