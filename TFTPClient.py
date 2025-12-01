@@ -88,7 +88,7 @@ def send_wrq(filename, mode):
                     break
     except FileNotFoundError:
         print(f"File '{filename}' not found")
-
+        
 
 def send_rrq(filename, mode):
     """서버에 파일 다운로드 요청(RRQ)"""
@@ -98,7 +98,7 @@ def send_rrq(filename, mode):
     )
     sock.sendto(rrq_message, server_address)  # 서버로 RRQ 메시지 전송
     print(f"=> RRQ message: {rrq_message}")
-
+    
 
 def send_ack(seq_num, server):
     """서버에 ACK 메시지 전송"""
@@ -108,7 +108,6 @@ def send_ack(seq_num, server):
     print(f"\n=> Block number: {seq_num}, Ack message: {ack_message}")
     # print(ack_message)
 
-
 # parse command line arguments
 parser = argparse.ArgumentParser(description="TFTP client program")
 parser.add_argument(dest="host", help="Server IP address", type=str)
@@ -117,12 +116,14 @@ parser.add_argument(dest="filename", help="name of file to transfer", type=str)
 parser.add_argument("-p", "--port", dest="port", type=int)
 args = parser.parse_args()
 
+
 """
 if validators.domain(args.host):
     serber_ip = gethostbyname(args.host)
 else
     server_ip = args.host
 """
+
 
 # 서버 주소 설정
 server_ip = args.host
@@ -197,5 +198,6 @@ elif operation == "put":
 else:
     print("Invalid operation. Use 'get' or 'put'.")
     sys.exit()
+
 
 
