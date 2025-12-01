@@ -88,7 +88,7 @@ def send_wrq(filename, mode):
                     break
     except FileNotFoundError:
         print(f"File '{filename}' not found")
-        
+
 
 def send_rrq(filename, mode):
     """서버에 파일 다운로드 요청(RRQ)"""
@@ -98,7 +98,7 @@ def send_rrq(filename, mode):
     )
     sock.sendto(rrq_message, server_address)  # 서버로 RRQ 메시지 전송
     print(f"=> RRQ message: {rrq_message}")
-    
+
 
 def send_ack(seq_num, server):
     """서버에 ACK 메시지 전송"""
@@ -108,6 +108,7 @@ def send_ack(seq_num, server):
     print(f"\n=> Block number: {seq_num}, Ack message: {ack_message}")
     # print(ack_message)
 
+
 # parse command line arguments
 parser = argparse.ArgumentParser(description="TFTP client program")
 parser.add_argument(dest="host", help="Server IP address", type=str)
@@ -116,14 +117,12 @@ parser.add_argument(dest="filename", help="name of file to transfer", type=str)
 parser.add_argument("-p", "--port", dest="port", type=int)
 args = parser.parse_args()
 
-
 """
 if validators.domain(args.host):
     serber_ip = gethostbyname(args.host)
 else
     server_ip = args.host
 """
-
 
 # 서버 주소 설정
 server_ip = args.host
@@ -149,20 +148,30 @@ if operation == "get":
     file = open(filename, "wb")
     expected_block = 1  # 기대하는 블록 번호 초기화
     last_acked = 0  # 마지막으로 ACK 보낸 블록 번호 초기화
+    retry_count = 0
 
     while True:
         try:
             data, server_new_socket = sock.recvfrom(516)  # 최대 516바이트 수신
         except socket.timeout:
+            retry_count += 1
+
+            # 첫 블록(1번 블록)을 전혀 받지 못한 상태에서 timeout → 즉시 종료
             if expected_block == 1:
                 print("Timeout before receiving first block. Exiting.")
                 sys.exit()
-            else:
-                print("Timeout waiting for data...")
-                send_ack(
-                    last_acked, server_new_socket
-                )  # 마지막으로 ACK 보낸 블록 번호 재전송
-                continue
+
+            # 첫 블록 이후 timeout → 재시도 횟수 초과 검사
+            if retry_count > MAX_TRY:
+                print("Max retry exceeded. Exiting.")
+                sys.exit()
+
+            # 재전송: 마지막 ACK 다시 보내기
+            print("Timeout waiting for data...")
+            send_ack(
+                last_acked, server_new_socket
+            )  # 마지막으로 ACK 보낸 블록 번호 재전송
+            continue
 
         opcode = int.from_bytes(data[:2], "big")  # 수신한 패킷의 opcode 확인
 
@@ -198,6 +207,3 @@ elif operation == "put":
 else:
     print("Invalid operation. Use 'get' or 'put'.")
     sys.exit()
-
-
-
