@@ -148,7 +148,7 @@ if operation == "get":
     file = open(filename, "wb")
     expected_block = 1  # 기대하는 블록 번호 초기화
     last_acked = 0  # 마지막으로 ACK 보낸 블록 번호 초기화
-    retry_count = 0
+    retry_count = 0 # timeout 발생 횟수
 
     while True:
         try:
@@ -207,3 +207,4 @@ elif operation == "put":
 else:
     print("Invalid operation. Use 'get' or 'put'.")
     sys.exit()
+
