@@ -153,11 +153,15 @@ if operation == "get":
         try:
             data, server_new_socket = sock.recvfrom(516)  # 최대 516바이트 수신
         except socket.timeout:
-            print("Timeout waiting for data...")
-            send_ack(
-                last_acked, server_new_socket
-            )  # 마지막으로 ACK 보낸 블록 번호 재전송
-            continue
+            if expected_block == 1:
+                print("Timeout before receiving first block. Exiting.")
+                sys.exit()
+            else:
+                print("Timeout waiting for data...")
+                send_ack(
+                    last_acked, server_new_socket
+                )  # 마지막으로 ACK 보낸 블록 번호 재전송
+                continue
 
         opcode = int.from_bytes(data[:2], "big")  # 수신한 패킷의 opcode 확인
 
@@ -193,4 +197,5 @@ elif operation == "put":
 else:
     print("Invalid operation. Use 'get' or 'put'.")
     sys.exit()
+
 
