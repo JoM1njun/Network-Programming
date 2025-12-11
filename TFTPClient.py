@@ -32,62 +32,90 @@ ERROR_CODE = {
 
 
 def send_wrq(filename, mode):
-    """서버에 파일 업로드 요청(WRQ)"""
-    format = f">h{len(filename)}sB{len(mode)}sB"  # WRQ 메시지 포맷
+    """서버에 파일 업로드 요청(WRQ) — 로컬 파일 절대 손상되지 않는 안전 버전"""
+
+    # 파일 전체를 메모리에 로드 (절대 건드리지 않음)
+    try:
+        with open(filename, "rb") as fr:
+            file_data_full = fr.read()
+    except FileNotFoundError:
+        print(f"File '{filename}' not found.")
+        return
+
+    # WRQ 메시지 만들기
+    format = f">h{len(filename)}sB{len(mode)}sB"
     wrq_message = pack(
         format, OPCODE["WRQ"], bytes(filename, "utf-8"), 0, bytes(mode, "utf-8"), 0
     )
-    sock.sendto(wrq_message, server_address)  # 서버로 WRQ 메시지 전송
+
+    sock.sendto(wrq_message, server_address)
     print(f"=> WRQ message: {wrq_message}")
 
-    # 파일 열기
-    try:
-        with open(filename, "rb") as f:
-            block_number = 0  # 현재 블록 번호
-            while True:
-                # 서버로부터 ACK 받기
-                while True:
-                    try:
-                        data, server_new_socket = sock.recvfrom(516)  # 서버 응답 수신
-                        opcode = int.from_bytes(data[:2], "big")  # opcode 확인
-                        if opcode == OPCODE["ACK"]:
-                            ack_block = int.from_bytes(
-                                data[2:4], "big"
-                            )  # ACK 블록 번호
-                            if (
-                                ack_block == block_number
-                            ):  # 기대하는 블록일 경우 다음 블록 전송
-                                block_number += 1
-                                break
-                        elif opcode == OPCODE["ERROR"]:  # 오류 처리
-                            error_code = int.from_bytes(data[2:4], "big")
-                            print(f"Error: {ERROR_CODE[error_code]}")
-                            return
-                    except socket.timeout:  # 응답 없을 시 재전송
-                        print("Timeout, resending last block...")
-                        # 마지막 블록 다시 보내기
-                        if block_number == 0:  # WRQ 재전송
-                            sock.sendto(wrq_message, server_address)
-                        else:  # 이전 Data 블록 재전송
-                            f.seek((block_number - 1) * BLOCK_SIZE)
-                            block_data = f.read(BLOCK_SIZE)
-                            data_message = (
-                                pack(">hh", OPCODE["DATA"], block_number) + block_data
-                            )
-                            sock.sendto(data_message, server_new_socket)
+    block_number = 0  # ACK(0) 기대
 
-                # 다음 블록 전송
-                block_data = f.read(BLOCK_SIZE)
-                data_message = pack(">hh", OPCODE["DATA"], block_number) + block_data
-                sock.sendto(data_message, server_new_socket)
-                print(f"=> Sent block {block_number}, size: {len(block_data)} bytes")
+    # 서버 ACK(0)을 기다림
+    while True:
+        try:
+            data, server_new_socket = sock.recvfrom(516)
+            opcode = int.from_bytes(data[:2], "big")
 
-                # 마지막 블록 확인
-                if len(block_data) < BLOCK_SIZE:
-                    print("Upload complete")
+            if opcode == OPCODE["ACK"]:
+                ack_block = int.from_bytes(data[2:4], "big")
+                if ack_block == 0:  # WRQ 수락 성공
                     break
-    except FileNotFoundError:
-        print(f"File '{filename}' not found")
+
+            elif opcode == OPCODE["ERROR"]:
+                error_code = int.from_bytes(data[2:4], "big")
+                print(f"Error: {ERROR_CODE[error_code]}")
+                return
+
+        except socket.timeout:
+            print("Timeout waiting for ACK(0). Resending WRQ...")
+            sock.sendto(wrq_message, server_address)
+
+    # -------------------------------
+    #        데이터 전송 시작
+    # -------------------------------
+
+    total_blocks = (len(file_data_full) + BLOCK_SIZE - 1) // BLOCK_SIZE
+
+    for block_number in range(1, total_blocks + 1):
+
+        start = (block_number - 1) * BLOCK_SIZE
+        end = start + BLOCK_SIZE
+        block_data = file_data_full[start:end]
+
+        data_message = pack(">hh", OPCODE["DATA"], block_number) + block_data
+        sock.sendto(data_message, server_new_socket)
+        print(f"=> Sent block {block_number}")
+
+        # ACK 기다림
+        retry = 0
+        while True:
+            try:
+                resp, _ = sock.recvfrom(516)
+                resp_opcode = int.from_bytes(resp[:2], "big")
+
+                if resp_opcode == OPCODE["ACK"]:
+                    ack_block = int.from_bytes(resp[2:4], "big")
+                    if ack_block == block_number:
+                        break  # 다음 블록으로 진행
+
+                elif resp_opcode == OPCODE["ERROR"]:
+                    error_code = int.from_bytes(resp[2:4], "big")
+                    print(f"Error: {ERROR_CODE[error_code]}")
+                    return
+
+            except socket.timeout:
+                retry += 1
+                if retry >= MAX_TRY:
+                    print(f"Timeout on block {block_number}. Upload failed.")
+                    return
+
+                print(f"Timeout waiting for ACK({block_number}). Retrying...")
+                sock.sendto(data_message, server_new_socket)
+
+    print("Upload complete.")
 
 
 def send_rrq(filename, mode):
